@@ -4,12 +4,12 @@
 use bytes::Bytes;
 use thiserror::Error;
 
-use crate::extensions::compression::{
-    CompressionError, DecompressionError, PerMessageCompressionContext,
-};
 #[cfg(feature = "handshake")]
 use crate::extensions::headers::{SecWebsocketExtensions, WebsocketProtocolExtension};
-use crate::protocol::Role;
+use crate::{
+    extensions::compression::{CompressionError, DecompressionError, PerMessageCompressionContext},
+    protocol::Role,
+};
 
 pub mod compression;
 #[cfg(feature = "headers")]
