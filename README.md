@@ -1,5 +1,12 @@
 # Tungstenite
 
+> **INTENT-HQ FORK** — this is [intent-hq](https://github.com/intent-hq)'s fork of
+> [snapview/tungstenite-rs](https://github.com/snapview/tungstenite-rs). The `deflate`
+> branch (default) carries permessage-deflate (RFC 7692) support, the public
+> `negotiate_offers` server-side extension negotiation API, and CI/upstream-sync
+> automation. See [MAINTENANCE.md](./MAINTENANCE.md) for the fork policy, branch
+> layout, upstream version bump procedure, and tagging convention.
+
 Lightweight stream-based WebSocket implementation for [Rust](https://www.rust-lang.org/).
 
 ```rust
