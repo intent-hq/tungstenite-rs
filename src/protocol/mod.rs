@@ -426,7 +426,7 @@ impl WebSocketContext {
         )
     }
 
-    /// Create a WebSocket context that manages an post-handshake stream.
+    /// Create a WebSocket context that manages a post-handshake stream.
     ///
     /// # Panics
     /// Panics if config is invalid e.g. `max_write_buffer_size <= write_buffer_size`.
