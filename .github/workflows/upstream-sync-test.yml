@@ -4,11 +4,9 @@
 # single draft PR against `deflate` as the notification (Issues are disabled on
 # this fork; a draft PR is the simplest surface a human actually notices).
 # This workflow NEVER pushes to `deflate` itself. See MAINTENANCE.md.
-name: Upstream Sync
+name: Upstream Sync (test)
 
 on:
-  schedule:
-    - cron: '17 6 * * 1' # weekly, Monday 06:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -22,7 +20,7 @@ concurrency:
 env:
   UPSTREAM_REPO: snapview/tungstenite-rs
   UPSTREAM_BRANCH: master
-  FORK_BRANCH: deflate
+  FORK_BRANCH: test/old-deflate
 
 jobs:
   sync:
@@ -31,7 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: deflate
+          ref: test/old-deflate
           fetch-depth: 0
 
       - name: Fetch upstream and detect new commits/releases
@@ -71,7 +69,7 @@ jobs:
           git config user.email "upstream-sync@users.noreply.github.com"
           # Stash the PR helper: the merge/reset below can rewrite the
           # working tree to upstream's, which does not contain it.
-          cp .github/workflows/upstream-sync-pr.sh "$RUNNER_TEMP/upstream-sync-pr.sh"
+          git show origin/deflate:.github/workflows/upstream-sync-pr.sh > "$RUNNER_TEMP/upstream-sync-pr.sh"
           # Reuse the head branch of an existing open sync PR (or, failing
           # that, the newest existing sync branch) so we keep updating a
           # single notification instead of piling up new branches/PRs.
