@@ -269,14 +269,8 @@ impl<S: Read + Write, C: Callback> HandshakeRole for ServerHandshake<S, C> {
                         ProtocolError::InvalidHeader(SecWebsocketExtensions::name().clone().into())
                     })?
                 {
-                    let extensions_config = self
-                        .config
-                        .ok_or_else(|| {
-                            ProtocolError::InvalidHeader(
-                                SecWebsocketExtensions::name().clone().into(),
-                            )
-                        })?
-                        .extensions;
+                    let extensions_config =
+                        self.config.map(|config| config.extensions).unwrap_or_default();
                     let (extensions, agreed) = extensions_config
                         .accept_offers(&extensions)
                         .map_err(ProtocolError::from)?;

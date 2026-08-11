@@ -1,12 +1,13 @@
 #![cfg(feature = "handshake")]
 #![allow(clippy::result_large_err)]
 use std::{
-    net::TcpListener,
+    io::{Read, Write},
+    net::{TcpListener, TcpStream},
     thread::{sleep, spawn},
     time::Duration,
 };
 use tungstenite::{
-    accept_hdr, connect,
+    accept, accept_hdr, connect,
     error::{Error, ProtocolError, SubProtocolError},
     handshake::{
         client::generate_key,
@@ -161,4 +162,52 @@ fn test_request_single_subprotocol() {
         response.headers().get("Sec-WebSocket-Protocol").unwrap(),
         "my-sub-protocol".parse::<http::HeaderValue>().unwrap()
     );
+}
+
+/// A server accepting with no config (`accept`, i.e. `config = None`) must decline
+/// extension offers it does not support (RFC 7692 section 7) instead of failing the
+/// handshake with `InvalidHeader("sec-websocket-extensions")`.
+#[test]
+fn test_accept_no_config_declines_offered_extensions() {
+    let server = TcpListener::bind("127.0.0.1:0").expect("Can't listen");
+    let addr = server.local_addr().unwrap();
+
+    let server_thread = spawn(move || {
+        let client_handler = server.incoming().next().unwrap();
+        let mut client_handler = accept(client_handler.unwrap()).expect("handshake must succeed");
+        client_handler.close(None).unwrap();
+    });
+
+    let mut stream = TcpStream::connect(addr).unwrap();
+    let request = format!(
+        "\
+        GET / HTTP/1.1\r\n\
+        Host: 127.0.0.1\r\n\
+        Connection: Upgrade\r\n\
+        Upgrade: websocket\r\n\
+        Sec-WebSocket-Version: 13\r\n\
+        Sec-WebSocket-Key: {}\r\n\
+        Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n\
+        \r\n",
+        generate_key()
+    );
+    stream.write_all(request.as_bytes()).unwrap();
+
+    let mut buf = vec![0u8; 4096];
+    let n = stream.read(&mut buf).unwrap();
+    let response = String::from_utf8_lossy(&buf[..n]);
+
+    assert!(
+        response.starts_with("HTTP/1.1 101"),
+        "expected 101 Switching Protocols, got: {}",
+        response
+    );
+    assert!(
+        !response.to_ascii_lowercase().contains("sec-websocket-extensions"),
+        "extension must be declined (no Sec-WebSocket-Extensions in response): {}",
+        response
+    );
+
+    drop(stream);
+    let _ = server_thread.join();
 }
