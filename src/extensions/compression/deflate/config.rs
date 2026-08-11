@@ -62,9 +62,6 @@ pub enum NegotiationError {
     /// Missing `server_no_context_takeover` value in a negotiation response.
     #[error("Missing {SERVER_NO_CONTEXT_TAKEOVER} value in a negotiation response")]
     MissingServerNoContextTakeover,
-    /// The `server_max_window_bits` value in a negotiation response is not in [`SUPPORTED_WINDOW_BITS`].
-    #[error("Unsupported {SERVER_MAX_WINDOW_BITS} value")]
-    UnsupportedServerMaxWindowBitsValue(u8),
     /// The `client_max_window_bits` value in a negotiation response is not in [`SUPPORTED_WINDOW_BITS`].
     #[error("Unsupported {CLIENT_MAX_WINDOW_BITS} value")]
     UnsupportedClientMaxWindowBitsValue(u8),
@@ -482,11 +479,13 @@ impl DeflateConfig {
                 return Err(NegotiationError::InvalidServerMaxWindowBitsValue(received.get()));
             }
 
-            if !SUPPORTED_WINDOW_BITS.contains(&received) {
-                return Err(NegotiationError::UnsupportedServerMaxWindowBitsValue(received.get()));
-            }
-
-            received
+            // The value indicates the window size the server will use to
+            // compress messages. Decompressing with a window at least as large
+            // as the compressor's is always safe, so any valid value is
+            // acceptable; clamp up to the smallest supported size if needed
+            // (e.g. an 8-bit window, which flate2 cannot be configured with
+            // but whose output a 9-bit window can decompress).
+            received.max(*SUPPORTED_WINDOW_BITS.start())
         };
 
         let client_max_window_bits = match server.client_max_window_bits {
@@ -859,6 +858,36 @@ mod test {
     }
 
     #[test]
+    fn declines_offer_with_unsupportable_window_bits() {
+        let server_config = DeflateConfig::new();
+
+        // A server_max_window_bits request below the supported range can't be
+        // honored, so the offer is declined.
+        assert_eq!(
+            server_config.accept_offer(PermessageDeflateConfig {
+                server_max_window_bits: Some(*ALLOWED_WINDOW_BITS.start()),
+                ..Default::default()
+            }),
+            None
+        );
+
+        // A client_max_window_bits value below the supported range means we
+        // can't decompress what the client would send; decline.
+        assert_eq!(
+            server_config.accept_offer(PermessageDeflateConfig {
+                client_max_window_bits: Some(Some(*ALLOWED_WINDOW_BITS.start())),
+                ..Default::default()
+            }),
+            None
+        );
+
+        // A server locally configured with a smaller client window must
+        // decline an offer that doesn't include client_max_window_bits.
+        let limited_server = DeflateConfig::new().set_max_window_bits(Role::Client, 12).unwrap();
+        assert_eq!(limited_server.accept_offer(PermessageDeflateConfig::default()), None);
+    }
+
+    #[test]
     fn interop() {
         // These are all mutually compatible, though they might result in
         // negotiated parameters that are not the default.
@@ -893,6 +922,71 @@ mod test {
                     panic!("client: {client_config:?}, server: {server_config:?}, offer: {offer:?}, response: {response:?}; error: {e}"));
             }
         }
+    }
+
+    #[test]
+    fn accepts_unsolicited_server_max_window_bits_response() {
+        // The client didn't request server_max_window_bits, but the server may
+        // still include it to inform the client of the window size it will use
+        // for compression. Any valid value is acceptable; see
+        // https://github.com/snapview/tungstenite-rs/pull/328#discussion_r1167592235
+        let client_config = DeflateConfig::new();
+
+        const SMALLER_WINDOW: NonZeroU8 = NonZeroU8::new(10).unwrap();
+        assert_eq!(
+            client_config.accept_response(PermessageDeflateConfig {
+                server_max_window_bits: Some(SMALLER_WINDOW),
+                ..Default::default()
+            }),
+            Ok(DeflateConfig { server_max_window_bits: SMALLER_WINDOW, ..client_config })
+        );
+
+        // A valid-per-RFC value of 8 is below what flate2 can be configured
+        // with; it gets clamped up to the smallest supported size, which is
+        // safe for decompression.
+        assert_eq!(
+            client_config.accept_response(PermessageDeflateConfig {
+                server_max_window_bits: Some(*ALLOWED_WINDOW_BITS.start()),
+                ..Default::default()
+            }),
+            Ok(DeflateConfig {
+                server_max_window_bits: *SUPPORTED_WINDOW_BITS.start(),
+                ..client_config
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_larger_than_requested_server_max_window_bits_response() {
+        const REQUESTED: NonZeroU8 = NonZeroU8::new(10).unwrap();
+        let client_config =
+            DeflateConfig::new().set_max_window_bits(Role::Server, REQUESTED.get()).unwrap();
+
+        // A response with the same or smaller value is accepted.
+        assert_eq!(
+            client_config.accept_response(PermessageDeflateConfig {
+                server_max_window_bits: Some(REQUESTED),
+                ..Default::default()
+            }),
+            Ok(client_config)
+        );
+
+        // A response with a larger value than requested is rejected.
+        const LARGER: NonZeroU8 = NonZeroU8::new(12).unwrap();
+        assert_eq!(
+            client_config.accept_response(PermessageDeflateConfig {
+                server_max_window_bits: Some(LARGER),
+                ..Default::default()
+            }),
+            Err(NegotiationError::InvalidServerMaxWindowBitsValue(LARGER.get()))
+        );
+
+        // A response that omits the parameter entirely didn't honor the
+        // offer's constraint and is rejected.
+        assert_eq!(
+            client_config.accept_response(PermessageDeflateConfig::default()),
+            Err(NegotiationError::MissingServerMaxWindowBitsValue)
+        );
     }
 
     #[test]
