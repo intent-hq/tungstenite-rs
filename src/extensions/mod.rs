@@ -5,7 +5,9 @@ use bytes::Bytes;
 use thiserror::Error;
 
 #[cfg(feature = "handshake")]
-use crate::extensions::headers::{SecWebsocketExtensions, WebsocketProtocolExtension};
+use crate::extensions::headers::{
+    parse_extensions, SecWebsocketExtensions, WebsocketProtocolExtension,
+};
 use crate::{
     extensions::compression::{CompressionError, DecompressionError, PerMessageCompressionContext},
     protocol::Role,
@@ -215,6 +217,89 @@ impl ExtensionsConfig {
             response.map(|response| SecWebsocketExtensions::new(std::iter::once(response))),
         ))
     }
+
+    /// Negotiates the extensions offered by a client against this
+    /// configuration, for a server that performs its own HTTP upgrade.
+    ///
+    /// `offers` is the value(s) of the `Sec-WebSocket-Extensions` header(s)
+    /// from the client's handshake request, in order. Pass one item per header
+    /// line; each item may itself be a comma-delimited list of offers.
+    ///
+    /// Returns the negotiated [`Extensions`] to pass to
+    /// [`WebSocket::from_raw_socket_with_extensions`] once the upgrade is
+    /// complete, along with the exact `Sec-WebSocket-Extensions` header value
+    /// to emit in the `101 Switching Protocols` response. If no offer is
+    /// accepted — because this configuration has no extensions enabled, or
+    /// every offer is unacceptable or malformed (which [RFC 7692 Section 7]
+    /// requires the server to decline rather than fail) — the returned header
+    /// value is `None`, no header should be emitted, and the returned
+    /// [`Extensions`] leaves all extensions disabled.
+    ///
+    /// This drives the same negotiation logic used internally by
+    /// [`accept_with_config`](crate::accept_with_config) and friends.
+    ///
+    /// [`WebSocket::from_raw_socket_with_extensions`]: crate::WebSocket::from_raw_socket_with_extensions
+    /// [RFC 7692 Section 7]: https://tools.ietf.org/html/rfc7692#section-7
+    #[cfg_attr(
+        feature = "deflate",
+        doc = r##"
+# Example
+
+A server accepting a `permessage-deflate` offer during a manual HTTP upgrade:
+
+```
+use tungstenite::{
+    extensions::ExtensionsConfig,
+    protocol::{Role, WebSocket},
+};
+
+// The server's extension configuration.
+let mut config = ExtensionsConfig::default();
+config.permessage_deflate = Some(Default::default());
+
+// The client's Sec-WebSocket-Extensions request header value(s).
+let offers = ["permessage-deflate; client_max_window_bits"];
+
+let (extensions, response_header) = config.negotiate_offers(offers)?;
+
+if let Some(value) = &response_header {
+    // Emit `Sec-WebSocket-Extensions: {value}` in the 101 response.
+    assert!(value.starts_with("permessage-deflate"));
+}
+
+// After writing the 101 response, hand the negotiated extensions to the
+// socket (`Cursor` stands in for the upgraded stream here).
+let stream = std::io::Cursor::new(Vec::<u8>::new());
+let websocket = WebSocket::from_raw_socket_with_extensions(stream, Role::Server, None, extensions);
+# let _ = websocket;
+# Ok::<_, tungstenite::extensions::ExtensionsError>(())
+```
+"##
+    )]
+    pub fn negotiate_offers<I>(
+        &self,
+        offers: I,
+    ) -> Result<(Extensions, Option<String>), ExtensionsError>
+    where
+        I: IntoIterator,
+        I::Item: AsRef<str>,
+    {
+        let offers: Vec<I::Item> = offers.into_iter().collect();
+        let offered = parse_extensions(&mut offers.iter().map(AsRef::as_ref))
+            .map_err(|_| ExtensionsError::MalformedExtension("Sec-WebSocket-Extensions"))?;
+
+        let (extensions, response) = self.accept_offers(&offered)?;
+
+        let response_header = response.map(|response| {
+            response
+                .header_value()
+                .to_str()
+                .expect("header value is valid ASCII by construction")
+                .to_owned()
+        });
+
+        Ok((extensions, response_header))
+    }
 }
 
 impl ExtensionsConfig {
@@ -418,5 +503,66 @@ mod test {
             result.unwrap_err(),
             ExtensionsError::ExtensionConflict(compression::deflate::EXTENSION_NAME.into())
         );
+    }
+
+    #[test]
+    fn negotiate_offers_declines_without_config() {
+        let (Extensions { per_message_compression }, response_header) = ExtensionsConfig::default()
+            .negotiate_offers(["permessage-deflate; client_max_window_bits"])
+            .unwrap();
+
+        assert!(per_message_compression.is_none());
+        assert_eq!(response_header, None);
+    }
+
+    #[cfg(feature = "deflate")]
+    #[test]
+    fn negotiate_offers_accepts_deflate_offer() {
+        let config = ExtensionsConfig { permessage_deflate: Some(Default::default()) };
+
+        let (Extensions { per_message_compression }, response_header) =
+            config.negotiate_offers(["permessage-deflate"]).unwrap();
+
+        assert!(per_message_compression.is_some());
+        assert_eq!(response_header.as_deref(), Some("permessage-deflate"));
+    }
+
+    #[cfg(feature = "deflate")]
+    #[test]
+    fn negotiate_offers_declines_malformed_offers() {
+        let config = ExtensionsConfig { permessage_deflate: Some(Default::default()) };
+
+        // Per RFC 7692 Section 7, each of these offers must be declined (not
+        // rejected): unknown parameter, invalid parameter value, duplicate
+        // parameter.
+        for offer in [
+            "permessage-deflate; parameter-from-the-future=3",
+            "permessage-deflate; client_max_window_bits=99",
+            "permessage-deflate; client_no_context_takeover; client_no_context_takeover",
+        ] {
+            let (Extensions { per_message_compression }, response_header) =
+                config.negotiate_offers([offer]).unwrap();
+
+            assert!(per_message_compression.is_none(), "offer must be declined: {offer}");
+            assert_eq!(response_header, None, "offer must be declined: {offer}");
+        }
+    }
+
+    #[cfg(feature = "deflate")]
+    #[test]
+    fn negotiate_offers_accepts_fallback_after_malformed_offer() {
+        let config = ExtensionsConfig { permessage_deflate: Some(Default::default()) };
+
+        // Multiple header values; the malformed first offer is declined and
+        // the acceptable second offer is negotiated.
+        let (Extensions { per_message_compression }, response_header) = config
+            .negotiate_offers([
+                "permessage-deflate; parameter-from-the-future=3",
+                "permessage-deflate",
+            ])
+            .unwrap();
+
+        assert!(per_message_compression.is_some());
+        assert_eq!(response_header.as_deref(), Some("permessage-deflate"));
     }
 }

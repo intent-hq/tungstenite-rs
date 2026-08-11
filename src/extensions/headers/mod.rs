@@ -8,6 +8,17 @@ pub(crate) use sec_websocket_extensions::{
     SecWebsocketExtensions, WebsocketExtensionParam, WebsocketProtocolExtension,
 };
 
+/// Parses the contents of one or more `Sec-WebSocket-Extensions` header
+/// values (each a comma-delimited list of extension directives) into a
+/// [`SecWebsocketExtensions`] header.
+#[cfg(feature = "handshake")]
+pub(crate) fn parse_extensions<'i>(
+    values: &mut impl Iterator<Item = &'i str>,
+) -> Result<SecWebsocketExtensions, Error> {
+    let extensions: Vec<WebsocketProtocolExtension> = from_delimited(values, ',')?;
+    Ok(SecWebsocketExtensions::new(extensions))
+}
+
 /// Reads a comma-delimited raw header into a Vec.
 fn from_comma_delimited<'i, I, T, E>(values: &mut I) -> Result<E, Error>
 where
