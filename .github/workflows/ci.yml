@@ -53,6 +53,9 @@ jobs:
       - name: Test
         run: cargo test --release
 
+      - name: Test (all features)
+        run: cargo test --release --all-features
+
   test-msvr:
     name: Test MSRV
     runs-on: ubuntu-latest
@@ -103,5 +106,23 @@ jobs:
       - name: Running Autobahn TestSuite for client
         run: ./scripts/autobahn-client.sh
 
+      - name: Autobahn client report summary
+        if: always()
+        run: python3 scripts/autobahn-summary.py autobahn/client/index.json "Autobahn client (${{ matrix.rust }})"
+
       - name: Running Autobahn TestSuite for server
         run: ./scripts/autobahn-server.sh
+
+      - name: Autobahn server report summary
+        if: always()
+        run: python3 scripts/autobahn-summary.py autobahn/server/index.json "Autobahn server (${{ matrix.rust }})"
+
+      - name: Upload Autobahn reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autobahn-reports-${{ matrix.rust }}
+          path: |
+            autobahn/client
+            autobahn/server
+          if-no-files-found: ignore
