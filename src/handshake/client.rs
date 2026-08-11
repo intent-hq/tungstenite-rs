@@ -483,7 +483,7 @@ mod tests {
         request.headers_mut().insert("X-City", non_ascii_value);
 
         // This should succeed, not fail with UTF-8 error
-        let result = generate_request(request);
+        let result = generate_request(request, None);
         assert!(result.is_ok(), "generate_request should accept non-ASCII header values");
 
         let (req_bytes, _key) = result.unwrap();
@@ -508,7 +508,7 @@ mod tests {
         request.headers_mut().insert("X-Test", latin1_value);
 
         // This should succeed
-        let result = generate_request(request);
+        let result = generate_request(request, None);
         assert!(result.is_ok(), "generate_request should accept Latin-1 header values");
 
         let (req_bytes, _key) = result.unwrap();

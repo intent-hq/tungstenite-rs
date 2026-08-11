@@ -22,7 +22,6 @@ use log::*;
 use std::{
     io::{self, Read, Write},
     mem::replace,
-    usize,
 };
 
 /// Indicates a Client or Server role of the websocket
@@ -820,7 +819,7 @@ impl WebSocketContext {
                         }
 
                         let incomplete_compressed =
-                            self.incomplete.as_ref().map_or(false, IncompleteMessage::compressed);
+                            self.incomplete.as_ref().is_some_and(IncompleteMessage::compressed);
                         match (incomplete_compressed, &decompressor) {
                             (false, _) => None,
                             (true, Some(_)) => decompressor,
@@ -1206,8 +1205,7 @@ mod tests {
         // With the default configuration, a short message of these frames is fine.
         {
             let input = Cursor::new(make_message(4));
-            let mut socket =
-                WebSocket::from_raw_socket(input, Role::Client, Some(base_config.clone()));
+            let mut socket = WebSocket::from_raw_socket(input, Role::Client, Some(base_config));
 
             let message = socket.read().unwrap();
             assert_eq!(
@@ -1227,7 +1225,7 @@ mod tests {
             let mut socket = WebSocket::from_raw_socket(
                 input,
                 Role::Client,
-                Some(base_config.clone().max_frame_size(Some(MAX_FRAME_SIZE))),
+                Some(base_config.max_frame_size(Some(MAX_FRAME_SIZE))),
             );
 
             let message = socket.read().unwrap();
@@ -1248,7 +1246,7 @@ mod tests {
             let mut socket = WebSocket::from_raw_socket(
                 input,
                 Role::Client,
-                Some(base_config.clone().max_message_size(Some(MAX_MESSAGE_SIZE))),
+                Some(base_config.max_message_size(Some(MAX_MESSAGE_SIZE))),
             );
 
             let error = socket.read().unwrap_err();

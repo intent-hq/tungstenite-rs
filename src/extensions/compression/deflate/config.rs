@@ -40,14 +40,14 @@ const CLIENT_MAX_WINDOW_BITS: &str = "client_max_window_bits";
 ///
 /// Defined by RFC 7692 Sections 7.1.2.1 and 7.1.2.2.
 const ALLOWED_WINDOW_BITS: std::ops::RangeInclusive<NonZeroU8> =
-    unsafe { NonZeroU8::new_unchecked(8)..=NonZeroU8::new_unchecked(15) };
+    NonZeroU8::new(8).unwrap()..=NonZeroU8::new(15).unwrap();
 
 /// The supported range of window bit sizes.
 ///
 /// This subset of [`ALLOWED_WINDOW_BITS`] is the range of sizes that this
 /// implementation can support.
 pub const SUPPORTED_WINDOW_BITS: std::ops::RangeInclusive<NonZeroU8> =
-    unsafe { NonZeroU8::new_unchecked(9) }..=*ALLOWED_WINDOW_BITS.end();
+    NonZeroU8::new(9).unwrap()..=*ALLOWED_WINDOW_BITS.end();
 
 /// Errors from `permessage-deflate` extension negotiation.
 #[derive(Copy, Clone, Debug, Error)]
@@ -842,7 +842,7 @@ mod test {
 
         // With the default value, the client should be able to say it will use
         // a smaller window size than the default.
-        const SMALLER_WINDOW: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(12) };
+        const SMALLER_WINDOW: NonZeroU8 = NonZeroU8::new(12).unwrap();
         assert_eq!(
             server_config.accept_offer(PermessageDeflateConfig {
                 client_max_window_bits: Some(Some(SMALLER_WINDOW)),
@@ -873,7 +873,7 @@ mod test {
             MODIFIERS
                 .iter()
                 .enumerate()
-                .filter(|(i, _)| (selector & (1 << i) != 0))
+                .filter(|(i, _)| selector & (1 << i) != 0)
                 .fold(DeflateConfig::new(), |config, (_, modifier)| modifier(config))
         }
 
@@ -902,7 +902,7 @@ mod test {
         assert_eq!(client_config.client_max_window_bits().get(), 15);
         // With the default value, the should be able to say it will use
         // a smaller window size than the default.
-        const SMALLER_WINDOW: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(12) };
+        const SMALLER_WINDOW: NonZeroU8 = NonZeroU8::new(12).unwrap();
         let server_response = PermessageDeflateConfig {
             server_max_window_bits: Some(*ALLOWED_WINDOW_BITS.end()),
             client_max_window_bits: Some(Some(SMALLER_WINDOW)),
