@@ -21,6 +21,7 @@ use super::{
 use crate::{
     error::{Error, ProtocolError, Result, SubProtocolError, UrlError},
     extensions::{headers::SecWebsocketExtensions, Extensions, ExtensionsConfig},
+    handshake::version_as_str,
     protocol::{Role, WebSocket, WebSocketConfig},
 };
 
@@ -125,9 +126,9 @@ pub fn generate_request(
     let mut req = Vec::new();
     write!(
         req,
-        "GET {path} {version:?}\r\n",
+        "GET {path} {version}\r\n",
         path = request.uri().path_and_query().ok_or(Error::Url(UrlError::NoPathOrQuery))?.as_str(),
-        version = request.version()
+        version = version_as_str(request.version())?,
     )
     .unwrap();
 
@@ -183,15 +184,15 @@ pub fn generate_request(
 
     // Now we must ensure that the headers that we've written once are not anymore present in the map.
     // If they do, then the request is invalid (some headers are duplicated there for some reason).
-    let insensitive: Vec<String> =
-        WEBSOCKET_HEADERS.iter().map(|h| h.to_ascii_lowercase()).collect();
+    let websocket_headers_contains =
+        |name| WEBSOCKET_HEADERS.iter().any(|h| h.eq_ignore_ascii_case(name));
+
     for (k, v) in headers {
         let mut name = k.as_str();
 
         // We have already written the necessary headers once (above) and removed them from the map.
         // If we encounter them again, then the request is considered invalid and error is returned.
-        // Note that we can't use `.contains()`, since `&str` does not coerce to `&String` in Rust.
-        if insensitive.iter().any(|x| x == name) {
+        if websocket_headers_contains(name) {
             return Err(Error::Protocol(ProtocolError::InvalidHeader(k.clone().into())));
         }
 
